@@ -1,0 +1,20 @@
+version: '3.7'
+services:
+  traffic-monitor:
+    image: traffic-monitor
+    build: .
+    environment:
+      TELEGRAM_BOT_TOKEN: 
+      TELEGRAM_CHAT_ID: 
+      TRAFFIC_DIRECTION: outbound  # 默认出向流量，可选: outbound, bidirectional
+      MONTHLY_TRAFFIC_GB: 200    # 默认每月 1024GB (1TB)
+      RESET_DAY: 1              # 默认每月 1 号重置
+      THRESHOLDS: "20,50,70,90,95"      # 默认阈值，逗号分隔
+      CHECK_INTERVAL_SECONDS: 60  # 默认检查间隔 300 秒
+      NETWORK_INTERFACE: eth0
+    volumes:
+      - /opt/docker/traffic-monitor/data:/data
+      - /etc/hostname:/etc/host_hostname:ro
+    restart: always
+    container_name: traffic-monitor
+    network_mode: host
