@@ -11,19 +11,19 @@ from logging.handlers import RotatingFileHandler
 # --- 从环境变量读取配置 ---
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-TRAFFIC_DIRECTION = os.environ.get("TRAFFIC_DIRECTION", "outbound")
-MONTHLY_TRAFFIC_GB = int(os.environ.get("MONTHLY_TRAFFIC_GB", 1024))
-RESET_DAY = int(os.environ.get("RESET_DAY", 1))
-THRESHOLDS_STR = os.environ.get("THRESHOLDS", "80,90,95")
+TRAFFIC_DIRECTION = os.environ.get("TRAFFIC_DIRECTION", "outbound")  # 流量方向，默认为出站
+MONTHLY_TRAFFIC_GB = int(os.environ.get("MONTHLY_TRAFFIC_GB", 1024))  # 每月流量上限，默认为 1024 GB
+RESET_DAY = int(os.environ.get("RESET_DAY", 1))  # 流量重置日，默认为每月 1 号
+THRESHOLDS_STR = os.environ.get("THRESHOLDS", "80,90,95")  # 流量阈值，默认为 80%, 90%, 95%
 THRESHOLDS = sorted([float(t) / 100 for t in THRESHOLDS_STR.split(",")])  # 将阈值转换为小数并排序
-CHECK_INTERVAL_SECONDS = int(os.environ.get("CHECK_INTERVAL_SECONDS", 60))
-NETWORK_INTERFACE = os.environ.get("NETWORK_INTERFACE", "eth0")
+CHECK_INTERVAL_SECONDS = int(os.environ.get("CHECK_INTERVAL_SECONDS", 1))  # 检查间隔，默认为 1 秒
+NETWORK_INTERFACE = os.environ.get("NETWORK_INTERFACE", "eth0")  # 网络接口名称，默认为 eth0
 
 # --- 常量 ---
 MAX_TRAFFIC_GB = MONTHLY_TRAFFIC_GB
-TRAFFIC_DATA_FILE = "/data/outbound_traffic.json"
-LOG_FILE = "traffic_monitor.log"
-LOG_MAX_SIZE_BYTES = 2 * 1024 * 1024  # 2MB
+TRAFFIC_DATA_FILE = "/data/outbound_traffic.json"  # 流量数据文件路径
+LOG_FILE = "traffic_monitor.log"  # 日志文件路径
+LOG_MAX_SIZE_BYTES = 2 * 1024 * 1024  # 日志文件最大大小，2MB
 
 # --- 配置日志 ---
 logger = logging.getLogger(__name__)
@@ -44,8 +44,10 @@ logger.addHandler(stream_handler)
 previous_tx_bytes = 0
 previous_rx_bytes = 0
 
-# --- 函数 (保持不变或稍作修改) ---
+# --- 函数 ---
+
 def send_telegram_message(message):
+    """发送 Telegram 消息"""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     data = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
     try:
@@ -56,6 +58,7 @@ def send_telegram_message(message):
         logger.error(f"发送 Telegram 消息时出错: {e}")
 
 def get_current_tx_bytes():
+    """获取当前发送的字节数"""
     try:
         with open(f"/sys/class/net/{NETWORK_INTERFACE}/statistics/tx_bytes", "r") as f:
             return int(f.read())
@@ -64,6 +67,7 @@ def get_current_tx_bytes():
         return None
 
 def get_current_rx_bytes():
+    """获取当前接收的字节数"""
     try:
         with open(f"/sys/class/net/{NETWORK_INTERFACE}/statistics/rx_bytes", "r") as f:
             return int(f.read())
@@ -72,26 +76,38 @@ def get_current_rx_bytes():
         return None
 
 def get_traffic_usage_gb(current_tx, current_rx):
+    """计算两个时间间隔之间的流量使用量（GB）"""
     global previous_tx_bytes, previous_rx_bytes
     tx_diff = 0
     rx_diff = 0
 
     if current_tx is not None:
-        tx_diff = current_tx - previous_tx_bytes if current_tx > previous_tx_bytes else 0
+        tx_diff = current_tx - previous_tx_bytes if current_tx >= previous_tx_bytes else 0
+        # 记录本次的 tx_bytes, rx_bytes
         previous_tx_bytes = current_tx
     else:
-        return 0 # 无法获取发送数据，返回 0
+        return 0  # 无法获取发送数据，返回 0
 
     if current_rx is not None:
-        rx_diff = current_rx - previous_rx_bytes if current_rx > previous_rx_bytes else 0
+        rx_diff = current_rx - previous_rx_bytes if current_rx >= previous_rx_bytes else 0
         previous_rx_bytes = current_rx
+    else:
+        rx_diff = 0
 
     if TRAFFIC_DIRECTION == "bidirectional":
-        return (tx_diff + rx_diff) / (1024 ** 3)
+        traffic_gb = (tx_diff + rx_diff) / (1024 ** 3)
     else:
-        return tx_diff / (1024 ** 3)
+        traffic_gb = tx_diff / (1024 ** 3)
+
+    # 添加详细日志
+    logger.debug(f"current_tx: {current_tx}, previous_tx_bytes: {previous_tx_bytes}, tx_diff: {tx_diff}")
+    logger.debug(f"current_rx: {current_rx}, previous_rx_bytes: {previous_rx_bytes}, rx_diff: {rx_diff}")
+    logger.debug(f"Calculated traffic usage: {traffic_gb:.6f} GB")
+
+    return traffic_gb
 
 def get_host_hostname_from_file():
+    """从 /etc/host_hostname 文件中获取主机名"""
     try:
         with open("/etc/host_hostname", "r") as f:
             return f.read().strip()
@@ -100,6 +116,7 @@ def get_host_hostname_from_file():
         return "Unknown"
 
 def get_public_ipv4():
+    """获取公网 IPv4 地址"""
     try:
         response = requests.get("https://4.ipw.cn", timeout=5)
         response.raise_for_status()
@@ -109,6 +126,7 @@ def get_public_ipv4():
         return "Unknown"
 
 def load_traffic_data():
+    """加载流量数据"""
     try:
         with open(TRAFFIC_DATA_FILE, "r") as f:
             return json.load(f)
@@ -120,6 +138,7 @@ def load_traffic_data():
         return {}
 
 def save_traffic_data(data):
+    """保存流量数据"""
     with open(TRAFFIC_DATA_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
@@ -130,9 +149,10 @@ if __name__ == "__main__":
     PUBLIC_IP = get_public_ipv4()
     send_telegram_message(f"流量监控服务已启动！主机名: {HOST_HOSTNAME} (IP: {PUBLIC_IP})")
 
-    # 初始化上一次的流量数据
+    # 第一次循环时初始化 previous_tx_bytes 和 previous_rx_bytes
     previous_tx_bytes = get_current_tx_bytes() or 0
     previous_rx_bytes = get_current_rx_bytes() or 0
+    logger.info(f"Initial previous_tx_bytes: {previous_tx_bytes}, previous_rx_bytes: {previous_rx_bytes}")
 
     while True:
         now = datetime.datetime.now()
@@ -144,12 +164,11 @@ if __name__ == "__main__":
         if current_month not in traffic_data:
             traffic_data[current_month] = {
                 "cumulative_traffic_gb": 0,
-                "sent_thresholds": {str(threshold): False for threshold in THRESHOLDS}, # 使用字典记录每个阈值的发送状态
+                "sent_thresholds": {str(threshold): False for threshold in THRESHOLDS},  # 使用字典记录每个阈值的发送状态
             }
             logger.info(f"为 {current_month} 创建新的流量记录。")
         else:
             # 启动时统计上一个周期的流量
-            previous_month_data = None
             if now.month == 1:
                 previous_month = f"{now.year - 1}-12"
             else:
@@ -198,6 +217,8 @@ if __name__ == "__main__":
 
             traffic_data[current_month]["cumulative_traffic_gb"] = total_usage_gb
             save_traffic_data(traffic_data)
+            logger.info(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] 本次流量: {current_usage_gb:.6f} GB, 总流量: {total_usage_gb:.2f} GB")
+
         else:
             logger.warning("无法获取流量数据，跳过本次检查。")
 
