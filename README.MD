@@ -4,7 +4,7 @@
 
 这是一个用于监控运行 Alpine Linux 的云服务器出站流量（或双向流量）的工具。它会定期检查服务器的流量使用情况，并在达到预设的阈值时通过 Telegram 发送告警通知。该工具使用 Python 编写，并通过 Docker 进行容器化，方便部署和管理。
 
-DockerHub 仓库地址: [https://hub.docker.com/repository/docker/zpljd/traffic-monitor/general](https://hub.docker.com/repository/docker/zpljd/traffic-monitor/general)
+DockerHub 仓库地址: [https://hub.docker.com/r/zpljd/traffic-monitor](https://hub.docker.com/r/zpljd/traffic-monitor)
 
 **主要功能:**
 
