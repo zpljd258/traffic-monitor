@@ -1,3 +1,4 @@
+# traffic_monitor.py
 import time
 import datetime
 import requests
@@ -18,6 +19,7 @@ THRESHOLDS_STR = os.environ.get("THRESHOLDS", "80,90,95")  # 流量阈值，默�
 THRESHOLDS = sorted([float(t) / 100 for t in THRESHOLDS_STR.split(",")])  # 将阈值转换为小数并排序
 CHECK_INTERVAL_SECONDS = int(os.environ.get("CHECK_INTERVAL_SECONDS", 1))  # 检查间隔，默认为 1 秒
 NETWORK_INTERFACE = os.environ.get("NETWORK_INTERFACE", "eth0")  # 网络接口名称，默认为 eth0
+REPORT_INTERVAL_DAYS = int(os.environ.get("REPORT_INTERVAL_DAYS", 7))  # 新增：报告间隔天数，默认为 7 天
 
 # --- 常量 ---
 MAX_TRAFFIC_GB = MONTHLY_TRAFFIC_GB
@@ -142,8 +144,22 @@ def save_traffic_data(data):
     with open(TRAFFIC_DATA_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
+def should_send_report(last_report_date, current_date):
+    """检查是否应该发送定期报告"""
+    if last_report_date is None:
+        return True  # 第一次运行，发送报告
+    last_report = datetime.datetime.strptime(last_report_date, "%Y-%m-%d").date()
+    current = datetime.datetime.strptime(current_date, "%Y-%m-%d").date()
+    return (current - last_report).days >= REPORT_INTERVAL_DAYS
+
+
 if __name__ == "__main__":
     logger.info("流量监控服务已启动。")
+
+    # 输入验证
+    if not 1 <= REPORT_INTERVAL_DAYS <= 15:
+        logger.warning(f"REPORT_INTERVAL_DAYS 值 ({REPORT_INTERVAL_DAYS}) 无效，已重置为默认值 7。")
+        REPORT_INTERVAL_DAYS = 7
 
     HOST_HOSTNAME = get_host_hostname_from_file()
     PUBLIC_IP = get_public_ipv4()
@@ -158,6 +174,7 @@ if __name__ == "__main__":
         now = datetime.datetime.now()
         current_month = now.strftime("%Y-%m")
         current_day = now.day
+        current_date = now.strftime("%Y-%m-%d")
 
         traffic_data = load_traffic_data()
 
@@ -165,13 +182,15 @@ if __name__ == "__main__":
             traffic_data[current_month] = {
                 "cumulative_traffic_gb": 0,
                 "sent_thresholds": {str(threshold): False for threshold in THRESHOLDS},  # 使用字典记录每个阈值的发送状态
-                "last_reset_day": 0  # 添加一个字段来追踪上次重置的日期
+                "last_reset_day": 0,  # 添加一个字段来追踪上次重置的日期
+                "last_report_date": None  # 新增：上次报告的日期
             }
             logger.info(f"为 {current_month} 创建新的流量记录。")
 
         cumulative_traffic_gb = traffic_data[current_month]["cumulative_traffic_gb"]
         sent_thresholds = traffic_data[current_month]["sent_thresholds"]
         last_reset_day = traffic_data[current_month].get("last_reset_day", 0) # 获取上次重置日期，默认为0
+        last_report_date = traffic_data[current_month].get("last_report_date") # 新增：获取上次报告日期
 
 
         logger.info(f"当前累计流量: {cumulative_traffic_gb:.2f} GB")
@@ -197,6 +216,7 @@ if __name__ == "__main__":
             traffic_data[current_month]["cumulative_traffic_gb"] = 0
             traffic_data[current_month]["sent_thresholds"] = {str(threshold): False for threshold in THRESHOLDS}
             traffic_data[current_month]["last_reset_day"] = current_day  # 更新上次重置日期
+            traffic_data[current_month]["last_report_date"] = None  # 重置上次报告日期
             logger.info(f"{current_month} 流量计数已重置。")
 
 
@@ -206,6 +226,18 @@ if __name__ == "__main__":
         if current_tx_bytes is not None:
             current_usage_gb = get_traffic_usage_gb(current_tx_bytes, current_rx_bytes)
             total_usage_gb = cumulative_traffic_gb + current_usage_gb
+
+            # 定期报告逻辑
+            if should_send_report(last_report_date, current_date):
+                usage_percentage = (total_usage_gb / MAX_TRAFFIC_GB) * 100 if MAX_TRAFFIC_GB > 0 else 0
+                report_message = (
+                    f"定期报告, 主机名: {HOST_HOSTNAME} (IP: {PUBLIC_IP}), "
+                    f"本周期内已使用流量 {total_usage_gb:.2f}GB/{MAX_TRAFFIC_GB}GB, "
+                    f"使用率 {usage_percentage:.0f}%"
+                )
+                send_telegram_message(report_message)
+                traffic_data[current_month]["last_report_date"] = current_date
+
 
             for threshold in THRESHOLDS:
                 if total_usage_gb >= MAX_TRAFFIC_GB * threshold and not sent_thresholds.get(str(threshold)):

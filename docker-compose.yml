@@ -1,4 +1,3 @@
-version: '3.7'
 services:
   traffic-monitor:
     image: traffic-monitor
@@ -11,6 +10,7 @@ services:
       RESET_DAY: 1              # 默认每月 1 号重置
       THRESHOLDS: "20,50,70,90,95"      # 默认阈值，逗号分隔
       CHECK_INTERVAL_SECONDS: 60  # 默认检查间隔 300 秒
+      REPORT_INTERVAL_DAYS: 1  # 新增：定期报告间隔（天），0 表示禁用.设置为1-15之间的整数。
       NETWORK_INTERFACE: eth0
     volumes:
       - /opt/docker/traffic-monitor/data:/data
