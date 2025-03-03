@@ -165,41 +165,40 @@ if __name__ == "__main__":
             traffic_data[current_month] = {
                 "cumulative_traffic_gb": 0,
                 "sent_thresholds": {str(threshold): False for threshold in THRESHOLDS},  # 使用字典记录每个阈值的发送状态
+                "last_reset_day": 0  # 添加一个字段来追踪上次重置的日期
             }
             logger.info(f"为 {current_month} 创建新的流量记录。")
-        else:
-            # 启动时统计上一个周期的流量
-            if now.month == 1:
-                previous_month = f"{now.year - 1}-12"
-            else:
-                previous_month = f"{now.year}-{now.month - 1:02d}"
+
+        cumulative_traffic_gb = traffic_data[current_month]["cumulative_traffic_gb"]
+        sent_thresholds = traffic_data[current_month]["sent_thresholds"]
+        last_reset_day = traffic_data[current_month].get("last_reset_day", 0) # 获取上次重置日期，默认为0
+
+
+        logger.info(f"当前累计流量: {cumulative_traffic_gb:.2f} GB")
+        
+        # 流量重置逻辑
+        if current_day == RESET_DAY and last_reset_day != current_day:
+            # 获取上个月的字符串和数据
+            previous_month = (now - datetime.timedelta(days=30)).strftime("%Y-%m") # 粗略计算上个月
 
             if previous_month in traffic_data:
                 previous_month_data = traffic_data[previous_month]
                 previous_cumulative_traffic_gb = previous_month_data.get("cumulative_traffic_gb", 0)
-                logger.info(f"上一个周期 ({previous_month}) 使用流量: {previous_cumulative_traffic_gb:.2f} GB")
-
-        cumulative_traffic_gb = traffic_data[current_month]["cumulative_traffic_gb"]
-        sent_thresholds = traffic_data[current_month]["sent_thresholds"]
-
-        logger.info(f"当前累计流量: {cumulative_traffic_gb:.2f} GB")
-
-        if current_day == RESET_DAY:
-            if traffic_data.get(current_month):
-                previous_month_str = now.strftime("%Y年%m月")
-                previous_cumulative_traffic_gb = traffic_data[current_month]["cumulative_traffic_gb"]
                 usage_percentage = (previous_cumulative_traffic_gb / MAX_TRAFFIC_GB) * 100 if MAX_TRAFFIC_GB > 0 else 0
 
                 reset_message = (
                     f"流量已重置, 主机名: {HOST_HOSTNAME} (IP: {PUBLIC_IP}), "
-                    f"{previous_month_str} 周期内使用流量 {previous_cumulative_traffic_gb:.2f}GB/{MAX_TRAFFIC_GB}GB, "
+                    f"{previous_month} 周期内使用流量 {previous_cumulative_traffic_gb:.2f}GB/{MAX_TRAFFIC_GB}GB, "
                     f"使用率 {usage_percentage:.0f}%"
                 )
                 send_telegram_message(reset_message)
 
-                traffic_data[current_month]["cumulative_traffic_gb"] = 0
-                traffic_data[current_month]["sent_thresholds"] = {str(threshold): False for threshold in THRESHOLDS}
-                logger.info(f"{current_month} 流量计数已重置。")
+            # 重置当前月数据
+            traffic_data[current_month]["cumulative_traffic_gb"] = 0
+            traffic_data[current_month]["sent_thresholds"] = {str(threshold): False for threshold in THRESHOLDS}
+            traffic_data[current_month]["last_reset_day"] = current_day  # 更新上次重置日期
+            logger.info(f"{current_month} 流量计数已重置。")
+
 
         current_tx_bytes = get_current_tx_bytes()
         current_rx_bytes = get_current_rx_bytes() if TRAFFIC_DIRECTION == "bidirectional" else None
